@@ -1,25 +1,25 @@
 [build]
-  command = "echo 'Building Netlify Functions...'"
+  command = "npm install --production"   # Install dependencies
   publish = "."
   functions = "netlify/functions"
 
 [build.environment]
   NODE_VERSION = "24"
 
-# Redirect & Rewrite untuk API
+# Redirect semua /api/* ke function
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
   force = true
 
-# Fallback untuk dashboard
+# Fallback: semua request ke dashboard.html (SPA style)
 [[redirects]]
   from = "/*"
   to = "/dashboard.html"
   status = 200
 
-# CORS Headers
+# CORS Headers untuk API
 [[headers]]
   for = "/api/*"
   [headers.values]
