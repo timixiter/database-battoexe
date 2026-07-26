@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BAT>EXE Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0b1120; color: #e5e7eb; }
+    .table-wrap { max-height: 70vh; overflow-y: auto; }
+    table { border-collapse: collapse; width: 100%; }
+    th { position: sticky; top: 0; background: #1e293b; z-index: 10; }
+    td, th { padding: 0.75rem 1rem; border-bottom: 1px solid #334155; }
+    tr:hover { background: #1e293b; }
+    .status-badge { padding: 0.2rem 0.8rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
+    .active { background: #22c55e; color: #000; }
+    .inactive { background: #64748b; color: #fff; }
+    .btn { padding: 0.4rem 1rem; border-radius: 0.375rem; font-weight: 600; transition: 0.2s; cursor: pointer; border: none; }
+    .btn-primary { background: #3b82f6; color: #fff; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-warning { background: #f59e0b; color: #000; }
+    .btn-warning:hover { background: #d97706; }
+    .btn-success { background: #22c55e; color: #000; }
+    .btn-success:hover { background: #16a34a; }
+    .modal-overlay { background: rgba(0,0,0,0.6); }
+    .loading { animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  </style>
+</head>
+<body>
+<div class="container mx-auto p-6 max-w-7xl">
+  <header class="flex flex-wrap items-center justify-between mb-6">
+    <h1 class="text-3xl font-bold text-blue-400">⚡ BAT>EXE Dashboard</h1>
+    <div class="flex gap-3">
+      <button onclick="refreshData()" class="btn btn-primary">🔄 Refresh</button>
+      <button onclick="openAddModal()" class="btn btn-success">➕ Add Invoice</button>
+    </div>
+  </header>
+
+  <div id="connectionStatus" class="mb-4 text-sm"></div>
+
+  <div class="grid grid-cols-3 gap-4 mb-6">
+    <div class="bg-gray-800 p-4 rounded-lg shadow">
+      <p class="text-sm text-gray-400">Total Invoice</p>
+      <p class="text-2xl font-bold" id="totalCount">-</p>
+    </div>
+    <div class="bg-gray-800 p-4 rounded-lg shadow">
+      <p class="text-sm text-gray-400">Aktif</p>
+      <p class="text-2xl font-bold text-green-400" id="activeCount">-</p>
+    </div>
+    <div class="bg-gray-800 p-4 rounded-lg shadow">
+      <p class="text-sm text-gray-400">Tidak Aktif</p>
+      <p class="text-2xl font-bold text-gray-400" id="inactiveCount">-</p>
+    </div>
+  </div>
+
+  <div class="bg-gray-900 rounded-lg shadow overflow-hidden">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Invoice</th>
+            <th>Status</th>
+            <th>Device Info</th>
+            <th>IP & Lokasi</th>
+            <th>Fingerprint</th>
+            <th>Serial</th>
+            <th>Waktu Aktivasi</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="invoiceTableBody">
+          <tr><td colspan="8" class="text-center py-8 text-gray-500 loading">⏳ Memuat data...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Add -->
+<div id="addModal" class="fixed inset-0 flex items-center justify-center modal-overlay hidden z-50">
+  <div class="bg-gray-800 p-6 rounded-lg shadow-lg w-96 max-w-full">
+    <h2 class="text-xl font-bold mb-4">Tambah Invoice Baru</h2>
+    <label class="block text-sm mb-1">Invoice ID (kosongkan untuk generate otomatis)</label>
+    <input id="newInvoiceInput" type="text" class="w-full p-2 rounded bg-gray-700 border border-gray-600 text-white" placeholder="INV-XXXX">
+    <div class="flex justify-end gap-3 mt-4">
+      <button onclick="closeAddModal()" class="btn btn-danger">Batal</button>
+      <button onclick="addInvoice()" class="btn btn-primary">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API_URL = '/api';
+
+  async function callApi(action, data = {}) {
+    const payload = { action, ...data };
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+    return await response.json();
+  }
+
+  async function fetchData() {
+    const statusEl = document.getElementById('connectionStatus');
+    try {
+      statusEl.innerHTML = '<span class="text-yellow-400">⏳ Menghubungi server...</span>';
+      const json = await callApi('list');
+      if (json.success) {
+        statusEl.innerHTML = '<span class="text-green-400">✅ Terhubung ke server</span>';
+        renderTable(json.data);
+        const stats = await callApi('stats');
+        if (stats.success) {
+          document.getElementById('totalCount').textContent = stats.total;
+          document.getElementById('activeCount').textContent = stats.active;
+          document.getElementById('inactiveCount').textContent = stats.inactive;
+        }
+      } else {
+        throw new Error(json.error || 'Gagal memuat data');
+      }
+    } catch (e) {
+      console.error('Fetch error:', e);
+      statusEl.innerHTML = `<span class="text-red-400">❌ Gagal terhubung ke server: ${e.message}</span>`;
+      document.getElementById('invoiceTableBody').innerHTML = `
+        <tr><td colspan="8" class="text-center py-8 text-red-400">
+          ❌ Gagal memuat data. Periksa koneksi atau API URL.<br/>
+          <span class="text-gray-500 text-sm">Error: ${e.message}</span>
+        </td></tr>
+      `;
+    }
+  }
+
+  function renderTable(data) {
+    const tbody = document.getElementById('invoiceTableBody');
+    if (!data || data.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-gray-500">Belum ada invoice</td></tr>`;
+      return;
+    }
+    let html = '';
+    data.forEach(item => {
+      const status = item.activated ? 'Aktif' : 'Tidak Aktif';
+      const statusClass = item.activated ? 'active' : 'inactive';
+      const device = item.device_info || '-';
+      const ip = item.ip || '-';
+      const loc = item.location ? `${item.location.country || ''} ${item.location.region || ''} ${item.location.city || ''}`.trim() || '-' : '-';
+      const fingerprint = item.fingerprint || '-';
+      const serial = item.serial || '-';
+      const activatedAt = item.activatedAt ? new Date(item.activatedAt).toLocaleString('id-ID') : '-';
+      html += `
+        <tr>
+          <td class="font-mono text-sm">${item.invoice}</td>
+          <td><span class="status-badge ${statusClass}">${status}</span></td>
+          <td class="text-sm">${device}</td>
+          <td class="text-sm">${ip}<br/><span class="text-gray-400 text-xs">${loc}</span></td>
+          <td class="text-xs font-mono">${fingerprint}</td>
+          <td class="text-xs font-mono">${serial}</td>
+          <td class="text-sm">${activatedAt}</td>
+          <td>
+            <div class="flex flex-wrap gap-1">
+              <button onclick="deleteInvoice('${item.invoice}')" class="btn btn-danger text-xs px-2 py-1">Hapus</button>
+              <button onclick="resetInvoice('${item.invoice}')" class="btn btn-warning text-xs px-2 py-1">Reset</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    });
+    tbody.innerHTML = html;
+  }
+
+  async function deleteInvoice(id) {
+    if (!confirm(`Yakin hapus invoice ${id}?`)) return;
+    try {
+      const json = await callApi('delete', { invoice: id });
+      if (json.success) { alert('Invoice dihapus'); refreshData(); }
+      else alert(json.message || 'Gagal');
+    } catch (e) { alert('Error: ' + e.message); }
+  }
+
+  async function resetInvoice(id) {
+    if (!confirm(`Reset invoice ${id}?`)) return;
+    try {
+      const json = await callApi('reset', { invoice: id });
+      if (json.success) { alert('Invoice direset'); refreshData(); }
+      else alert(json.message || 'Gagal');
+    } catch (e) { alert('Error: ' + e.message); }
+  }
+
+  function openAddModal() {
+    document.getElementById('addModal').classList.remove('hidden');
+    document.getElementById('newInvoiceInput').value = '';
+    document.getElementById('newInvoiceInput').focus();
+  }
+  function closeAddModal() {
+    document.getElementById('addModal').classList.add('hidden');
+  }
+
+  async function addInvoice() {
+    const input = document.getElementById('newInvoiceInput');
+    const id = input.value.trim();
+    try {
+      const json = await callApi('add', { newInvoiceId: id });
+      if (json.success) {
+        alert(`Invoice ${json.invoice} berhasil ditambahkan`);
+        closeAddModal();
+        refreshData();
+      } else {
+        alert(json.message || 'Gagal menambahkan');
+      }
+    } catch (e) { alert('Error: ' + e.message); }
+  }
+
+  function refreshData() { fetchData(); }
+  setInterval(refreshData, 10000);
+  refreshData();
+</script>
+</body>
+</html>
