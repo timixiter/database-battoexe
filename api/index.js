@@ -1,25 +1,27 @@
 import { kv } from '@vercel/kv';
 
-// Helper: dapatkan lokasi dari IP (gunakan ip-api.com)
+// Helper: dapatkan lokasi dari IP
 async function getLocation(ip) {
-  if (!ip || ip === 'unknown') return { country: 'Unknown', city: 'Unknown', region: '' };
+  if (!ip || ip === 'unknown' || ip === '127.0.0.1' || ip === '::1') {
+    return { country: 'Unknown', region: '', city: '', lat: null, lon: null };
+  }
   try {
     const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city,lat,lon`);
+    if (!res.ok) return { country: 'Unknown', region: '', city: '' };
     const data = await res.json();
     if (data.status === 'success') {
       return { country: data.country, region: data.regionName, city: data.city, lat: data.lat, lon: data.lon };
     }
   } catch (_) {}
-  return { country: 'Unknown', city: 'Unknown', region: '' };
+  return { country: 'Unknown', region: '', city: '' };
 }
 
-// Generate ID acak (jika tidak diisi)
 function generateInvoiceId() {
   return 'INV-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
 }
 
 export default async function handler(req, res) {
-  // CORS agar dapat diakses dari mana saja (termasuk dashboard)
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -28,7 +30,6 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Hanya terima POST (untuk keseragaman)
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -36,41 +37,41 @@ export default async function handler(req, res) {
   const { action, invoice, device_info, ip, fingerprint, serial, newInvoiceId } = req.body;
 
   try {
-    // Key untuk menyimpan daftar semua invoice
     const INVOICE_SET_KEY = 'invoices';
 
+    // --- VALIDATE ---
     if (action === 'validate') {
-      if (!invoice) return res.status(400).json({ error: 'Invoice required' });
+      if (!invoice) return res.status(400).json({ success: false, message: 'Invoice required' });
       const data = await kv.get(`invoice:${invoice}`);
-      if (!data) return res.json({ valid: false, message: 'Invoice tidak ditemukan' });
-      if (data.activated) return res.json({ valid: false, message: 'Invoice sudah digunakan' });
-      return res.json({ valid: true, message: 'Invoice valid' });
+      if (!data) return res.json({ success: false, valid: false, message: 'Invoice tidak ditemukan' });
+      if (data.activated) return res.json({ success: false, valid: false, message: 'Invoice sudah digunakan' });
+      return res.json({ success: true, valid: true, message: 'Invoice valid' });
     }
 
+    // --- ACTIVATE ---
     if (action === 'activate') {
-      if (!invoice) return res.status(400).json({ error: 'Invoice required' });
+      if (!invoice) return res.status(400).json({ success: false, message: 'Invoice required' });
       const key = `invoice:${invoice}`;
       const data = await kv.get(key);
       if (!data) return res.json({ success: false, message: 'Invoice tidak ditemukan' });
+
       if (data.activated) {
-        // Cek apakah device sama (fingerprint atau serial)
+        // Cek apakah fingerprint atau serial cocok
         const existingFingerprint = data.fingerprint || '';
         const existingSerial = data.serial || '';
         const currentFingerprint = fingerprint || '';
         const currentSerial = serial || '';
-        // Jika fingerprint atau serial cocok, izinkan (re-aktivasi perangkat sama)
-        if (existingFingerprint === currentFingerprint || existingSerial === currentSerial) {
-          // Update waktu aktivasi (opsional)
+        if (existingFingerprint === currentFingerprint && existingSerial === currentSerial) {
+          // Update waktu aktivasi
           await kv.set(key, { ...data, activatedAt: new Date().toISOString() });
           return res.json({ success: true, message: 'Re-aktivasi berhasil' });
         }
         return res.json({ success: false, message: 'Invoice sudah digunakan oleh perangkat lain' });
       }
 
-      // Dapatkan lokasi dari IP
+      // Dapatkan lokasi
       const location = await getLocation(ip || 'unknown');
 
-      // Update data
       const updated = {
         ...data,
         activated: true,
@@ -85,8 +86,8 @@ export default async function handler(req, res) {
       return res.json({ success: true, message: 'Aktivasi berhasil' });
     }
 
+    // --- LIST ---
     if (action === 'list') {
-      // Ambil semua invoice ID dari set
       const ids = await kv.smembers(INVOICE_SET_KEY);
       const invoices = [];
       for (const id of ids) {
@@ -98,20 +99,20 @@ export default async function handler(req, res) {
       return res.json({ success: true, data: invoices });
     }
 
+    // --- ADD ---
     if (action === 'add') {
       let id = newInvoiceId ? newInvoiceId.trim() : '';
-      if (!id) {
-        // Generate otomatis
-        id = generateInvoiceId();
-      } else {
-        // Cek apakah sudah ada
+      if (id) {
         const exists = await kv.get(`invoice:${id}`);
         if (exists) return res.json({ success: false, message: 'Invoice ID sudah ada' });
+      } else {
+        id = generateInvoiceId();
       }
       const newData = {
         invoice: id,
         activated: false,
         createdAt: new Date().toISOString(),
+        activatedAt: null,
         device_info: '',
         ip: '',
         fingerprint: '',
@@ -123,8 +124,9 @@ export default async function handler(req, res) {
       return res.json({ success: true, message: 'Invoice berhasil ditambahkan', invoice: id });
     }
 
+    // --- DELETE ---
     if (action === 'delete') {
-      if (!invoice) return res.status(400).json({ error: 'Invoice required' });
+      if (!invoice) return res.status(400).json({ success: false, message: 'Invoice required' });
       const key = `invoice:${invoice}`;
       const exists = await kv.get(key);
       if (!exists) return res.json({ success: false, message: 'Invoice tidak ditemukan' });
@@ -133,12 +135,12 @@ export default async function handler(req, res) {
       return res.json({ success: true, message: 'Invoice dihapus' });
     }
 
+    // --- RESET ---
     if (action === 'reset') {
-      if (!invoice) return res.status(400).json({ error: 'Invoice required' });
+      if (!invoice) return res.status(400).json({ success: false, message: 'Invoice required' });
       const key = `invoice:${invoice}`;
       const data = await kv.get(key);
       if (!data) return res.json({ success: false, message: 'Invoice tidak ditemukan' });
-      // Reset status dan hapus data perangkat, tapi pertahankan createdAt
       const resetData = {
         ...data,
         activated: false,
@@ -153,6 +155,7 @@ export default async function handler(req, res) {
       return res.json({ success: true, message: 'Invoice direset' });
     }
 
+    // --- STATS ---
     if (action === 'stats') {
       const ids = await kv.smembers(INVOICE_SET_KEY);
       let total = ids.length;
@@ -164,9 +167,9 @@ export default async function handler(req, res) {
       return res.json({ success: true, total, active, inactive: total - active });
     }
 
-    return res.status(400).json({ error: 'Action tidak dikenal' });
+    return res.status(400).json({ success: false, error: 'Action tidak dikenal' });
   } catch (error) {
     console.error('API Error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ success: false, error: 'Internal server error' });
   }
-    }
+}
