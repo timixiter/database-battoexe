@@ -1,28 +1,26 @@
 import { Redis } from '@upstash/redis';
 
 // ========== INISIALISASI REDIS DENGAN PENGECEKAN ==========
-const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
-const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+function getRedis() {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-if (!redisUrl || !redisToken) {
-  console.error('❌ Environment variables UPSTASH_REDIS_REST_URL dan UPSTASH_REDIS_REST_TOKEN wajib diisi!');
+  if (!url || !token) {
+    console.error('❌ UPSTASH_REDIS_REST_URL atau UPSTASH_REDIS_REST_TOKEN tidak terdefinisi.');
+    return null;
+  }
+
+  try {
+    const redis = new Redis({ url, token });
+    // Tes koneksi (opsional, tapi bisa dilakukan di handler)
+    return redis;
+  } catch (err) {
+    console.error('❌ Gagal inisialisasi Redis:', err.message);
+    return null;
+  }
 }
 
-// Buat instance Redis, jika URL tidak valid akan throw error
-let redis;
-try {
-  redis = new Redis({
-    url: redisUrl,
-    token: redisToken,
-  });
-  // Tes koneksi (opsional)
-  await redis.ping();
-  console.log('✅ Koneksi Redis berhasil');
-} catch (err) {
-  console.error('❌ Gagal koneksi ke Redis:', err.message);
-  // Kita tetap lanjutkan tapi nanti akan error di handler
-  redis = null;
-}
+const redis = getRedis();
 
 // ========== HELPER ==========
 async function getLocation(ip) {
@@ -61,7 +59,7 @@ export default async function handler(req, res) {
   // ========== CEK KONEKSI REDIS ==========
   if (!redis) {
     return res.status(500).json({ 
-      error: 'Database tidak terhubung. Periksa environment variables UPSTASH_REDIS_REST_URL dan UPSTASH_REDIS_REST_TOKEN' 
+      error: 'Database tidak terhubung. Pastikan environment variables UPSTASH_REDIS_REST_URL dan UPSTASH_REDIS_REST_TOKEN sudah diatur di Vercel.'
     });
   }
 
@@ -96,7 +94,6 @@ export default async function handler(req, res) {
       const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
       
       if (data.activated) {
-        // Cek fingerprint/serial
         const existingFingerprint = data.fingerprint || '';
         const existingSerial = data.serial || '';
         const currentFingerprint = fingerprint || '';
@@ -210,6 +207,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Action tidak dikenal' });
   } catch (error) {
     console.error('API Error:', error);
-    return res.status(500).json({ error: 'Internal server error: ' + error.message, stack: error.stack });
+    return res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 }
