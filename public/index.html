@@ -27,7 +27,6 @@
     .modal-overlay { background: rgba(0,0,0,0.6); }
     .loading { animation: pulse 1.5s ease-in-out infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-    .error-box { background: #7f1d1d; border: 1px solid #ef4444; padding: 1rem; border-radius: 0.5rem; margin: 1rem 0; }
   </style>
 </head>
 <body>
@@ -40,10 +39,8 @@
     </div>
   </header>
 
-  <!-- Status Koneksi -->
   <div id="connectionStatus" class="mb-4 text-sm"></div>
 
-  <!-- Statistik -->
   <div class="grid grid-cols-3 gap-4 mb-6">
     <div class="bg-gray-800 p-4 rounded-lg shadow">
       <p class="text-sm text-gray-400">Total Invoice</p>
@@ -59,7 +56,6 @@
     </div>
   </div>
 
-  <!-- Tabel -->
   <div class="bg-gray-900 rounded-lg shadow overflow-hidden">
     <div class="table-wrap">
       <table>
@@ -97,7 +93,6 @@
 </div>
 
 <script>
-  // Gunakan path relatif ke API
   const API_URL = '/api';
 
   async function callApi(action, data = {}) {
@@ -107,11 +102,10 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const text = await response.text();
+      throw new Error(`HTTP ${response.status}: ${text}`);
     }
-    
     return await response.json();
   }
 
@@ -119,12 +113,10 @@
     const statusEl = document.getElementById('connectionStatus');
     try {
       statusEl.innerHTML = '<span class="text-yellow-400">⏳ Menghubungi server...</span>';
-      
       const json = await callApi('list');
       if (json.success) {
         statusEl.innerHTML = '<span class="text-green-400">✅ Terhubung ke server</span>';
         renderTable(json.data);
-        
         const stats = await callApi('stats');
         if (stats.success) {
           document.getElementById('totalCount').textContent = stats.total;
@@ -139,7 +131,7 @@
       statusEl.innerHTML = `<span class="text-red-400">❌ Gagal terhubung ke server: ${e.message}</span>`;
       document.getElementById('invoiceTableBody').innerHTML = `
         <tr><td colspan="8" class="text-center py-8 text-red-400">
-          ❌ Gagal memuat data. Periksa koneksi atau API URL.<br/>
+          ❌ Gagal memuat data.<br/>
           <span class="text-gray-500 text-sm">Error: ${e.message}</span>
         </td></tr>
       `;
@@ -237,7 +229,6 @@
     fetchData();
   }
 
-  // Auto refresh setiap 10 detik
   setInterval(refreshData, 10000);
   refreshData();
 </script>
