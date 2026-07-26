@@ -1,7 +1,14 @@
-import { Redis } from '@upstash/redis';
+// api/index.js
+const { Redis } = require('@upstash/redis');
 
-// Inisialisasi Redis dengan environment variables
-const redis = Redis.fromEnv();
+// Inisialisasi Redis dengan pengecekan environment
+let redis;
+try {
+  redis = Redis.fromEnv();
+} catch (e) {
+  console.error('Redis init error:', e);
+  redis = null;
+}
 
 // Helper: dapatkan lokasi dari IP
 async function getLocation(ip) {
@@ -14,7 +21,7 @@ async function getLocation(ip) {
     if (data.status === 'success') {
       return { country: data.country, region: data.regionName, city: data.city, lat: data.lat, lon: data.lon };
     }
-  } catch (_) { }
+  } catch (_) {}
   return { country: 'Unknown', region: 'Unknown', city: 'Unknown', lat: null, lon: null };
 }
 
@@ -22,24 +29,27 @@ function generateInvoiceId() {
   return 'INV-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
 }
 
-export default async function handler(req, res) {
-  // ========== CORS HEADERS (WAJIB) ==========
+module.exports = async function handler(req, res) {
+  // ========== CORS HEADERS ==========
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Max-Age', '86400');
 
-  // Tangani preflight OPTIONS
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  // Hanya terima POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Parse body dengan aman
+  // Cek koneksi Redis
+  if (!redis) {
+    console.error('Redis not initialized. Check environment variables.');
+    return res.status(500).json({ error: 'Redis connection error. Check environment variables.' });
+  }
+
   let body;
   try {
     body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -54,11 +64,10 @@ export default async function handler(req, res) {
     // ========== VALIDATE ==========
     if (action === 'validate') {
       if (!invoice) return res.status(400).json({ error: 'Invoice required' });
-      const data = await redis.get(`invoice:${invoice}`);
-      if (!data) return res.json({ valid: false, message: 'Invoice tidak ditemukan' });
-      // Data dari Redis adalah string JSON, parse dulu
-      const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-      if (parsed.activated) return res.json({ valid: false, message: 'Invoice sudah digunakan' });
+      const raw = await redis.get(`invoice:${invoice}`);
+      if (!raw) return res.json({ valid: false, message: 'Invoice tidak ditemukan' });
+      const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (data.activated) return res.json({ valid: false, message: 'Invoice sudah digunakan' });
       return res.json({ valid: true, message: 'Invoice valid' });
     }
 
@@ -68,7 +77,6 @@ export default async function handler(req, res) {
       const key = `invoice:${invoice}`;
       const raw = await redis.get(key);
       if (!raw) return res.json({ success: false, message: 'Invoice tidak ditemukan' });
-      
       const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
       
       if (data.activated) {
@@ -187,4 +195,4 @@ export default async function handler(req, res) {
     console.error('API Error:', error);
     return res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
-}
+};
