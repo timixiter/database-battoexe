@@ -1,20 +1,42 @@
 import { Redis } from '@upstash/redis';
 
-// Inisialisasi Redis dari environment variables (otomatis dari Vercel)
-const redis = Redis.fromEnv();
+// ========== INISIALISASI REDIS DENGAN PENGECEKAN ==========
+const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
 
+if (!redisUrl || !redisToken) {
+  console.error('❌ Environment variables UPSTASH_REDIS_REST_URL dan UPSTASH_REDIS_REST_TOKEN wajib diisi!');
+}
+
+// Buat instance Redis, jika URL tidak valid akan throw error
+let redis;
+try {
+  redis = new Redis({
+    url: redisUrl,
+    token: redisToken,
+  });
+  // Tes koneksi (opsional)
+  await redis.ping();
+  console.log('✅ Koneksi Redis berhasil');
+} catch (err) {
+  console.error('❌ Gagal koneksi ke Redis:', err.message);
+  // Kita tetap lanjutkan tapi nanti akan error di handler
+  redis = null;
+}
+
+// ========== HELPER ==========
 async function getLocation(ip) {
   if (!ip || ip === 'unknown' || ip === '127.0.0.1' || ip === '::1') {
-    return { country: 'Unknown', region: 'Unknown', city: 'Unknown' };
+    return { country: 'Unknown', region: 'Unknown', city: 'Unknown', lat: null, lon: null };
   }
   try {
-    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city`);
+    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city,lat,lon`);
     const data = await res.json();
     if (data.status === 'success') {
-      return { country: data.country, region: data.regionName, city: data.city };
+      return { country: data.country, region: data.regionName, city: data.city, lat: data.lat, lon: data.lon };
     }
-  } catch (_) {}
-  return { country: 'Unknown', region: 'Unknown', city: 'Unknown' };
+  } catch (_) { }
+  return { country: 'Unknown', region: 'Unknown', city: 'Unknown', lat: null, lon: null };
 }
 
 function generateInvoiceId() {
@@ -22,10 +44,11 @@ function generateInvoiceId() {
 }
 
 export default async function handler(req, res) {
-  // CORS headers
+  // ========== CORS ==========
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -35,19 +58,32 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // ========== CEK KONEKSI REDIS ==========
+  if (!redis) {
+    return res.status(500).json({ 
+      error: 'Database tidak terhubung. Periksa environment variables UPSTASH_REDIS_REST_URL dan UPSTASH_REDIS_REST_TOKEN' 
+    });
+  }
+
+  // ========== PARSE BODY ==========
+  let body;
   try {
-    const body = req.body;
-    const { action, invoice, device_info, ip, fingerprint, serial, newInvoiceId } = body;
+    body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid JSON body' });
+  }
 
-    const INVOICE_SET_KEY = 'invoices';
+  const { action, invoice, device_info, ip, fingerprint, serial, newInvoiceId } = body;
+  const INVOICE_SET_KEY = 'invoices';
 
+  try {
     // ========== VALIDATE ==========
     if (action === 'validate') {
       if (!invoice) return res.status(400).json({ error: 'Invoice required' });
-      const data = await redis.get(`invoice:${invoice}`);
-      if (!data) return res.json({ valid: false, message: 'Invoice tidak ditemukan' });
-      const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-      if (parsed.activated) return res.json({ valid: false, message: 'Invoice sudah digunakan' });
+      const raw = await redis.get(`invoice:${invoice}`);
+      if (!raw) return res.json({ valid: false, message: 'Invoice tidak ditemukan' });
+      const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (data.activated) return res.json({ valid: false, message: 'Invoice sudah digunakan' });
       return res.json({ valid: true, message: 'Invoice valid' });
     }
 
@@ -58,15 +94,16 @@ export default async function handler(req, res) {
       const raw = await redis.get(key);
       if (!raw) return res.json({ success: false, message: 'Invoice tidak ditemukan' });
       const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
-
+      
       if (data.activated) {
+        // Cek fingerprint/serial
         const existingFingerprint = data.fingerprint || '';
         const existingSerial = data.serial || '';
         const currentFingerprint = fingerprint || '';
         const currentSerial = serial || '';
         if (existingFingerprint === currentFingerprint || existingSerial === currentSerial) {
-          const updated = { ...data, activatedAt: new Date().toISOString() };
-          await redis.set(key, JSON.stringify(updated));
+          data.activatedAt = new Date().toISOString();
+          await redis.set(key, JSON.stringify(data));
           return res.json({ success: true, message: 'Re-aktivasi berhasil' });
         }
         return res.json({ success: false, message: 'Invoice sudah digunakan oleh perangkat lain' });
@@ -175,4 +212,4 @@ export default async function handler(req, res) {
     console.error('API Error:', error);
     return res.status(500).json({ error: 'Internal server error: ' + error.message, stack: error.stack });
   }
-        }
+}
