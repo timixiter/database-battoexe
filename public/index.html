@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BAT>EXE Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0b1120; color: #e5e7eb; }
+    .table-wrap { max-height: 70vh; overflow-y: auto; }
+    table { border-collapse: collapse; width: 100%; }
+    th { position: sticky; top: 0; background: #1e293b; z-index: 10; }
+    td, th { padding: 0.75rem 1rem; border-bottom: 1px solid #334155; }
+    tr:hover { background: #1e293b; }
+    .status-badge { padding: 0.2rem 0.8rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
+    .active { background: #22c55e; color: #000; }
+    .inactive { background: #64748b; color: #fff; }
+    .btn { padding: 0.4rem 1rem; border-radius: 0.375rem; font-weight: 600; transition: 0.2s; }
+    .btn-primary { background: #3b82f6; color: #fff; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-warning { background: #f59e0b; color: #000; }
+    .btn-warning:hover { background: #d97706; }
+    .btn-success { background: #22c55e; color: #000; }
+    .btn-success:hover { background: #16a34a; }
+    .modal-overlay { background: rgba(0,0,0,0.7); }
+  </style>
+</head>
+<body>
+<div class="container mx-auto p-6 max-w-7xl">
+  <header class="flex flex-wrap items-center justify-between mb-6">
+    <h1 class="text-3xl font-bold text-blue-400">⚡ BAT>EXE Dashboard</h1>
+    <div class="flex gap-3">
+      <button onclick="refreshData()" class="btn btn-primary">🔄 Refresh</button>
+      <button onclick="openAddModal()" class="btn btn-success">➕ Add Invoice</button>
+    </div>
+  </header>
+
+  <!-- Statistik -->
+  <div class="grid grid-cols-3 gap-4 mb-6">
+    <div class="bg-gray-800 p-4 rounded-lg shadow">
+      <p class="text-sm text-gray-400">Total Invoice</p>
+      <p class="text-2xl font-bold" id="totalCount">-</p>
+    </div>
+    <div class="bg-gray-800 p-4 rounded-lg shadow">
+      <p class="text-sm text-gray-400">Aktif</p>
+      <p class="text-2xl font-bold text-green-400" id="activeCount">-</p>
+    </div>
+    <div class="bg-gray-800 p-4 rounded-lg shadow">
+      <p class="text-sm text-gray-400">Tidak Aktif</p>
+      <p class="text-2xl font-bold text-gray-400" id="inactiveCount">-</p>
+    </div>
+  </div>
+
+  <!-- Tabel -->
+  <div class="bg-gray-900 rounded-lg shadow overflow-hidden">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Invoice</th>
+            <th>Status</th>
+            <th>Device Info</th>
+            <th>IP & Lokasi</th>
+            <th>Fingerprint</th>
+            <th>Serial</th>
+            <th>Waktu Aktivasi</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="invoiceTableBody">
+          <tr><td colspan="8" class="text-center py-8 text-gray-500">Memuat data...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Add Invoice -->
+<div id="addModal" class="fixed inset-0 flex items-center justify-center modal-overlay hidden z-50">
+  <div class="bg-gray-800 p-6 rounded-lg shadow-lg w-96 max-w-full">
+    <h2 class="text-xl font-bold mb-4">Tambah Invoice Baru</h2>
+    <label class="block text-sm mb-1">Invoice ID (kosongkan untuk generate otomatis)</label>
+    <input id="newInvoiceInput" type="text" class="w-full p-2 rounded bg-gray-700 border border-gray-600 text-white" placeholder="INV-XXXX">
+    <div class="flex justify-end gap-3 mt-4">
+      <button onclick="closeAddModal()" class="btn btn-danger">Batal</button>
+      <button onclick="addInvoice()" class="btn btn-primary">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API_URL = '/api';
+
+  // Fungsi untuk memanggil API
+  async function callApi(action, payload = {}) {
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ...payload })
+      });
+      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+      return await res.json();
+    } catch (err) {
+      console.error('API call error:', err);
+      throw err;
+    }
+  }
+
+  // Refresh data
+  async function refreshData() {
+    try {
+      const listResult = await callApi('list');
+      if (listResult.success) {
+        renderTable(listResult.data);
+      } else {
+        alert('Gagal memuat data: ' + (listResult.message || ''));
+      }
+
+      const statsResult = await callApi('stats');
+      if (statsResult.success) {
+        document.getElementById('totalCount').textContent = statsResult.total;
+        document.getElementById('activeCount').textContent = statsResult.active;
+        document.getElementById('inactiveCount').textContent = statsResult.inactive;
+      } else {
+        document.getElementById('totalCount').textContent = 'Error';
+        document.getElementById('activeCount').textContent = 'Error';
+        document.getElementById('inactiveCount').textContent = 'Error';
+      }
+    } catch (e) {
+      alert('Gagal terhubung ke server. Periksa koneksi atau API URL.');
+      document.getElementById('invoiceTableBody').innerHTML = `<tr><td colspan="8" class="text-center py-8 text-red-400">❌ Gagal memuat data</td></tr>`;
+    }
+  }
+
+  function renderTable(data) {
+    const tbody = document.getElementById('invoiceTableBody');
+    if (!data || data.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-gray-500">Belum ada invoice</td></tr>`;
+      return;
+    }
+    let html = '';
+    data.forEach(item => {
+      const status = item.activated ? 'Aktif' : 'Tidak Aktif';
+      const statusClass = item.activated ? 'active' : 'inactive';
+      const device = item.device_info || '-';
+      const ip = item.ip || '-';
+      const loc = item.location ? `${item.location.country || ''} ${item.location.region || ''} ${item.location.city || ''}`.trim() || '-' : '-';
+      const fingerprint = item.fingerprint || '-';
+      const serial = item.serial || '-';
+      const activatedAt = item.activatedAt ? new Date(item.activatedAt).toLocaleString('id-ID') : '-';
+      html += `
+        <tr>
+          <td class="font-mono text-sm">${item.invoice}</td>
+          <td><span class="status-badge ${statusClass}">${status}</span></td>
+          <td class="text-sm">${device}</td>
+          <td class="text-sm">${ip}<br/><span class="text-gray-400 text-xs">${loc}</span></td>
+          <td class="text-xs font-mono">${fingerprint}</td>
+          <td class="text-xs font-mono">${serial}</td>
+          <td class="text-sm">${activatedAt}</td>
+          <td>
+            <div class="flex flex-wrap gap-1">
+              <button onclick="deleteInvoice('${item.invoice}')" class="btn btn-danger text-xs px-2 py-1">Hapus</button>
+              <button onclick="resetInvoice('${item.invoice}')" class="btn btn-warning text-xs px-2 py-1">Reset</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    });
+    tbody.innerHTML = html;
+  }
+
+  // Aksi Delete
+  async function deleteInvoice(id) {
+    if (!confirm(`Yakin hapus invoice ${id}?`)) return;
+    try {
+      const result = await callApi('delete', { invoice: id });
+      if (result.success) {
+        alert('Invoice dihapus');
+        refreshData();
+      } else {
+        alert(result.message || 'Gagal menghapus');
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+  }
+
+  // Aksi Reset
+  async function resetInvoice(id) {
+    if (!confirm(`Reset invoice ${id}? (data perangkat akan dihapus)`)) return;
+    try {
+      const result = await callApi('reset', { invoice: id });
+      if (result.success) {
+        alert('Invoice direset');
+        refreshData();
+      } else {
+        alert(result.message || 'Gagal reset');
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+  }
+
+  // Modal
+  function openAddModal() {
+    document.getElementById('addModal').classList.remove('hidden');
+    document.getElementById('newInvoiceInput').value = '';
+    document.getElementById('newInvoiceInput').focus();
+  }
+  function closeAddModal() {
+    document.getElementById('addModal').classList.add('hidden');
+  }
+
+  // Add Invoice
+  async function addInvoice() {
+    const input = document.getElementById('newInvoiceInput');
+    const id = input.value.trim();
+    try {
+      const result = await callApi('add', { newInvoiceId: id });
+      if (result.success) {
+        alert(`Invoice ${result.invoice} berhasil ditambahkan`);
+        closeAddModal();
+        refreshData();
+      } else {
+        alert(result.message || 'Gagal menambahkan');
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+  }
+
+  // Auto refresh setiap 10 detik
+  setInterval(refreshData, 10000);
+
+  // Load pertama
+  refreshData();
+</script>
+</body>
+</html>
