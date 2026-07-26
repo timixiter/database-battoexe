@@ -1,0 +1,28 @@
+[build]
+  command = "echo 'Building Netlify Functions...'"
+  publish = "."
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+# Redirect & Rewrite untuk API
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+# Fallback untuk dashboard
+[[redirects]]
+  from = "/*"
+  to = "/dashboard.html"
+  status = 200
+
+# CORS Headers
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
