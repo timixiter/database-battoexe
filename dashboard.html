@@ -79,7 +79,6 @@
   </div>
 </div>
 
-<!-- Modal Add -->
 <div id="addModal" class="fixed inset-0 flex items-center justify-center modal-overlay hidden z-50">
   <div class="bg-gray-800 p-6 rounded-lg shadow-lg w-96 max-w-full">
     <h2 class="text-xl font-bold mb-4">Tambah Invoice Baru</h2>
@@ -96,16 +95,12 @@
   const API_URL = '/api';
 
   async function callApi(action, data = {}) {
-    const payload = { action, ...data };
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ action, ...data })
     });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`HTTP ${response.status}: ${text}`);
-    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.json();
   }
 
@@ -127,12 +122,10 @@
         throw new Error(json.error || 'Gagal memuat data');
       }
     } catch (e) {
-      console.error('Fetch error:', e);
-      statusEl.innerHTML = `<span class="text-red-400">❌ Gagal terhubung ke server: ${e.message}</span>`;
+      statusEl.innerHTML = `<span class="text-red-400">❌ Gagal terhubung: ${e.message}</span>`;
       document.getElementById('invoiceTableBody').innerHTML = `
         <tr><td colspan="8" class="text-center py-8 text-red-400">
-          ❌ Gagal memuat data. Periksa koneksi atau API URL.<br/>
-          <span class="text-gray-500 text-sm">Error: ${e.message}</span>
+          ❌ Gagal memuat data.<br/><span class="text-gray-500 text-sm">${e.message}</span>
         </td></tr>
       `;
     }
@@ -203,8 +196,7 @@
   }
 
   async function addInvoice() {
-    const input = document.getElementById('newInvoiceInput');
-    const id = input.value.trim();
+    const id = document.getElementById('newInvoiceInput').value.trim();
     try {
       const json = await callApi('add', { newInvoiceId: id });
       if (json.success) {
@@ -218,6 +210,7 @@
   }
 
   function refreshData() { fetchData(); }
+
   setInterval(refreshData, 10000);
   refreshData();
 </script>
