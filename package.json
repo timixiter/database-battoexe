@@ -3,5 +3,8 @@
   "version": "1.0.0",
   "dependencies": {
     "@upstash/redis": "^1.34.3"
+  },
+  "scripts": {
+    "build": "echo 'No build needed'"
   }
 }
