@@ -1,6 +1,7 @@
 {
   "name": "bat-exe-dashboard",
   "version": "1.0.0",
+  "type": "module",
   "dependencies": {
     "@upstash/redis": "^1.34.3"
   }
